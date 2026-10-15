@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  UPSTREAM: "komari-monitor/komari"
+  UPSTREAM: "@@UPSTREAM@@"
 
 jobs:
   mirror:
@@ -29,7 +29,7 @@ jobs:
           set -euo pipefail
           mkdir -p assets
           gh api --paginate "repos/${UPSTREAM}/releases?per_page=100" > upstream-releases.json
-          jq -r '.[] | select(.draft == false) | .id' upstream-releases.json | while read -r rid; do
+          jq -r '.[] | select(.draft == false@@PRFILTER@@) | .id' upstream-releases.json | while read -r rid; do
             rel=$(jq --argjson id "$rid" '.[] | select(.id == $id)' upstream-releases.json)
             tag=$(jq -r '.tag_name' <<<"$rel")
             if gh release view "$tag" --repo "$TARGET" >/dev/null 2>&1; then
