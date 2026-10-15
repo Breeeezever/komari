@@ -1,0 +1,52 @@
+name: Mirror upstream releases
+
+on:
+  schedule:
+    - cron: "10 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror-releases
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: "komari-monitor/komari"
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Mirror missing releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh api --paginate "repos/${UPSTREAM}/releases?per_page=100" > upstream-releases.json
+          jq -r '.[] | select(.draft == false and .prerelease == false) | .id' upstream-releases.json | while read -r rid; do
+            rel=$(jq --argjson id "$rid" '.[] | select(.id == $id)' upstream-releases.json)
+            tag=$(jq -r '.tag_name' <<<"$rel")
+            if gh release view "$tag" --repo "$TARGET" >/dev/null 2>&1; then
+              echo "Release ${tag} exists, skip."
+              continue
+            fi
+            name=$(jq -r '.name // ""' <<<"$rel")
+            body=$(jq -r '.body // ""' <<<"$rel")
+            pre=$(jq -r '.prerelease' <<<"$rel")
+            args=("$tag" --repo "$TARGET" --title "$name" --notes "$body")
+            [ "$pre" = true ] && args+=(--prerelease)
+            gh release create "${args[@]}"
+            dir="assets/${tag}"; mkdir -p "$dir"
+            jq -r '.assets[] | [.url, .name] | @tsv' <<<"$rel" | while IFS=$'\t' read -r url fn; do
+              echo "Downloading ${fn}"
+              gh api "$url" -H 'Accept: application/octet-stream' > "$dir/$fn"
+            done
+            find "$dir" -maxdepth 1 -type f -print0 | xargs -0 -r gh release upload "$tag" --repo "$TARGET" --clobber
+          done
+          echo "Mirror pass complete."
