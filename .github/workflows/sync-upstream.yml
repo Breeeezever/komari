@@ -2,7 +2,7 @@ name: Sync upstream (anchored)
 
 on:
   schedule:
-    - cron: "17 15 * * *"
+    - cron: "12 16 * * *"
   workflow_dispatch:
 
 permissions:
@@ -68,20 +68,25 @@ jobs:
             fi
             git checkout --ours -- .github/workflows
             git add -A .github/workflows
-            git commit --no-edit
+            git commit --no-edit || git merge --continue
           fi
-          # freeze .github/workflows at the pre-merge fork state
-          PRE=$(git rev-parse HEAD^1)
-          git diff-tree -r --name-only --diff-filter=A "$PRE" HEAD -- .github/workflows | while read -r f; do
-            [ -n "$f" ] && git rm -q -f "$f"
-          done
-          git checkout "$PRE" -- .github/workflows
-          if git diff --quiet HEAD; then
-            echo "freeze: no workflow changes to revert"
+          # 仅当本次运行真正创建了 merge commit（存在第二父）才执行 freeze，
+          # 否则 HEAD 是上次普通提交，amend 会改写它导致 push non-fast-forward
+          if git rev-parse -q --verify HEAD^2 >/dev/null 2>&1; then
+            PRE=$(git rev-parse HEAD^1)
+            git diff-tree -r --name-only --diff-filter=A "$PRE" HEAD -- .github/workflows | while read -r f; do
+              [ -n "$f" ] && git rm -q -f "$f"
+            done
+            git checkout "$PRE" -- .github/workflows
+            if git diff --quiet HEAD; then
+              echo "freeze: no workflow changes to revert"
+            else
+              git commit --amend --no-edit >/dev/null
+            fi
+            git diff --stat "$PRE" HEAD -- .github/workflows | grep -q . && {
+              echo "::error::workflow freeze failed"; exit 1
+            } || true
+            git push origin "HEAD:${{ github.ref_name }}"
           else
-            git commit --amend --no-edit >/dev/null
+            echo "No merge commit created (already up to date); nothing to push."
           fi
-          git diff --stat "$PRE" HEAD -- .github/workflows | grep -q . && {
-            echo "::error::workflow freeze failed"; exit 1
-          } || true
-          git push origin "HEAD:${{ github.ref_name }}"
