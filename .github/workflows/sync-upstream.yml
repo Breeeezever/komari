@@ -2,7 +2,7 @@ name: Sync upstream (anchored)
 
 on:
   schedule:
-    - cron: "12 16 * * *"
+    - cron: "12 16 */14 * *"
   workflow_dispatch:
 
 permissions:
